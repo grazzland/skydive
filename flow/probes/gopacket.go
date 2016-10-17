@@ -114,11 +114,11 @@ func (p *GoPacketProbe) stop() {
 }
 
 func getGoPacketFirstLayerType(n *graph.Node) gopacket.LayerType {
-	switch n.Metadata()["Type"] {
+	switch n.Metadata()["Type"].(string) {
 	case "bridge", "bond", "can", "dummy", "hsr", "ifb", "macvlan", "macvtap",
 		"veth", "vlan", "vxlan", "gretap", "ip6gretap", "geneve":
 		return layers.LayerTypeEthernet
-	case "ipoib", "vcan", "ipip", "ipvlan", "lowpan":
+	case "ipoib", "vcan", "ipip", "ipvlan", "lowpan", "gre":
 		return layers.LayerTypeIPv4
 	case "ip6tnl", "ip6gre", "sit":
 		return layers.LayerTypeIPv6
