@@ -30,6 +30,35 @@ import (
 	v "github.com/gima/govalid/v1"
 )
 
+func TestFlowSimple(t *testing.T) {
+	table := NewTable(nil, nil)
+	packet := forgeTestPacket(t, 64, false, IPv4, TCP)
+	FlowsFromGoPacket(table, packet, 0, nil)
+	flows := table.GetFlows(nil).GetFlows()
+	if len(flows) != 1 {
+		t.Error("A single packet must generate 1 flow")
+	}
+}
+
+func TestFlowParentUUID(t *testing.T) {
+	table := NewTable(nil, nil)
+	packet := forgeTestPacket(t, 64, false, ETH, IPv4, GRE, IPv4, TCP)
+	flows := FlowsFromGoPacket(table, packet, 0, nil)
+	if flows[1].ParentUUID != flows[0].UUID {
+		t.Errorf("Encapsulated flow must have ParentUUID == %s", flows[0].UUID)
+	}
+}
+
+func TestFlowEncaspulation(t *testing.T) {
+	table := NewTable(nil, nil)
+	packet := forgeTestPacket(t, 64, false, ETH, IPv4, GRE, IPv4, GRE, IPv4, TCP)
+	FlowsFromGoPacket(table, packet, 0, nil)
+	flows := table.GetFlows(nil).GetFlows()
+	if len(flows) != 3 {
+		t.Error("An encapsulated encaspsulated packet must generate 3 flows")
+	}
+}
+
 func TestFlowJSON(t *testing.T) {
 	f := Flow{
 		UUID:       "uuid-1",
