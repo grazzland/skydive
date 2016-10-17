@@ -103,11 +103,11 @@ func (f FlowKey) String() string {
 	return string(f)
 }
 
-func FlowKeyFromGoPacket(p *gopacket.Packet) FlowKey {
+func FlowKeyFromGoPacket(p *gopacket.Packet, parentUUID string) FlowKey {
 	network := layerFlow((*p).NetworkLayer()).FastHash()
 	transport := layerFlow((*p).TransportLayer()).FastHash()
 
-	return FlowKey(strconv.FormatUint(uint64(network^transport), 10))
+	return FlowKey(parentUUID + strconv.FormatUint(uint64(network^transport), 10))
 }
 
 func layerPathFromGoPacket(packet *gopacket.Packet) string {
@@ -142,13 +142,14 @@ func (flow *Flow) UpdateUUIDs(key string) {
 	flow.UUID = hex.EncodeToString(hasher.Sum(nil))
 }
 
-func (flow *Flow) initFromGoPacket(key string, now int64, packet *gopacket.Packet, length int64, setter FlowProbeNodeSetter) {
+func (flow *Flow) initFromGoPacket(key string, now int64, packet *gopacket.Packet, parentUUID string, length int64, setter FlowProbeNodeSetter) {
 	flow.Init(now, packet, length)
 
 	if setter != nil {
 		setter.SetProbeNode(flow)
 	}
 
+	flow.ParentUUID = parentUUID
 	flow.LayersPath = layerPathFromGoPacket(packet)
 
 	flow.UpdateUUIDs(key)
@@ -174,16 +175,56 @@ func (flow *Flow) GetData() ([]byte, error) {
 	return data, nil
 }
 
-func FlowFromGoPacket(ft *Table, packet *gopacket.Packet, length int64, setter FlowProbeNodeSetter) *Flow {
-	if el := (*packet).Layer(layers.LayerTypeEthernet); el == nil {
-		logging.GetLogger().Error("Unable to decode the ethernet layer")
-		return nil
+func FlowsFromGoPacket(ft *Table, packet *gopacket.Packet, length int64, setter FlowProbeNodeSetter) []*Flow {
+	var packetsFlows []*gopacket.Packet
+
+	packetData := (*packet).Data()
+	packetLayers := (*packet).Layers()
+
+	var start int
+	var innerLen int
+	var firstLayer = packetLayers[0]
+
+	for i, layer := range packetLayers {
+		innerLen += len(layer.LayerContents())
+		layerType := layer.LayerType()
+
+		switch layerType {
+		case layers.LayerTypeGRE, layers.LayerTypeVXLAN:
+			p := gopacket.NewPacket(packetData[start:start+innerLen], firstLayer.LayerType(), gopacket.Default)
+			packetsFlows = append(packetsFlows, &p)
+			start = innerLen
+			innerLen = 0
+			if i+1 < len(packetLayers)-1 {
+				firstLayer = packetLayers[i+1]
+			}
+		}
 	}
 
-	key := FlowKeyFromGoPacket(packet).String()
+	if len(packetsFlows) > 0 {
+		p := gopacket.NewPacket(packetData[start:], firstLayer.LayerType(), gopacket.Default)
+		packetsFlows = append(packetsFlows, &p)
+	} else {
+		packetsFlows = append(packetsFlows, packet)
+	}
+
+	flows := make([]*Flow, len(packetsFlows))
+	var parentUUID string
+	for i, p := range packetsFlows {
+		flows[i] = FlowFromGoPacket(ft, p, parentUUID, length, setter)
+		parentUUID = flows[i].UUID
+	}
+
+	return flows
+
+}
+
+func FlowFromGoPacket(ft *Table, packet *gopacket.Packet, parentUUID string, length int64, setter FlowProbeNodeSetter) *Flow {
+
+	key := FlowKeyFromGoPacket(packet, parentUUID).String()
 	flow, new := ft.GetOrCreateFlow(key)
 	if new {
-		flow.initFromGoPacket(key, ft.GetTime(), packet, length, setter)
+		flow.initFromGoPacket(key, ft.GetTime(), packet, parentUUID, length, setter)
 	} else {
 		flow.Update(ft.GetTime(), packet, length)
 	}
@@ -210,7 +251,7 @@ func FlowsFromSFlowSample(ft *Table, sample *layers.SFlowFlowSample, setter Flow
 
 		record := rec.(layers.SFlowRawPacketFlowRecord)
 
-		flow := FlowFromGoPacket(ft, &record.Header, int64(record.FrameLength), setter)
+		flow := FlowFromGoPacket(ft, &record.Header, "", int64(record.FrameLength), setter)
 		if flow != nil {
 			flows = append(flows, flow)
 		}
