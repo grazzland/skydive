@@ -1211,3 +1211,98 @@ func TestFlowGRETunnel(t *testing.T) {
 	client.Delete("capture", capture1.ID())
 	client.Delete("capture", capture2.ID())
 }
+
+func TestFlowVxlanTunnel(t *testing.T) {
+	ts := NewTestStorage()
+
+	aa := helper.NewAgentAnalyzerWithConfig(t, confAgentAnalyzer, ts)
+	aa.Start()
+	defer aa.Stop()
+
+	client, err := api.NewCrudClientFromConfig(&http.AuthenticationOpts{})
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	capture1 := api.NewCapture("G.V().Has('Name', 'vxlan-vm1').Out().Has('Name', 'vxlan')", "")
+	if err := client.Create("capture", capture1); err != nil {
+		t.Fatal(err.Error())
+	}
+
+	capture2 := api.NewCapture("G.V().Has('Name', 'vxlan-vm2-eth0')", "")
+	if err := client.Create("capture", capture2); err != nil {
+		t.Fatal(err.Error())
+	}
+
+	time.Sleep(1 * time.Second)
+	setupCmds := []helper.Cmd{
+		{"sudo ovs-vsctl add-br br-vxlan", true},
+
+		{"sudo ip netns add vxlan-vm1", true},
+		{"sudo ip link add vxlan-vm1-eth0 type veth peer name eth0 netns vxlan-vm1", true},
+		{"sudo ip link set vxlan-vm1-eth0 up", true},
+
+		{"sudo ip netns exec vxlan-vm1 ip link set eth0 up", true},
+		{"sudo ip netns exec vxlan-vm1 ip address add 172.16.0.1/24 dev eth0", true},
+
+		{"sudo ip netns add vxlan-vm2", true},
+		{"sudo ip link add vxlan-vm2-eth0 type veth peer name eth0 netns vxlan-vm2", true},
+		{"sudo ip link set vxlan-vm2-eth0 up", true},
+		{"sudo ip netns exec vxlan-vm2 ip link set eth0 up", true},
+		{"sudo ip netns exec vxlan-vm2 ip address add 172.16.0.2/24 dev eth0", true},
+
+		{"sudo ovs-vsctl add-port br-vxlan vxlan-vm1-eth0", true},
+		{"sudo ovs-vsctl add-port br-vxlan vxlan-vm2-eth0", true},
+
+		{"sudo ip netns exec vxlan-vm1 ip l add vxlan type vxlan id 10 group 239.0.0.10 ttl 10 dev eth0 dstport 4789", true},
+		{"sudo ip netns exec vxlan-vm1 ip l set vxlan up", true},
+		{"sudo ip netns exec vxlan-vm1 ip link add name dummy0 type dummy", true},
+		{"sudo ip netns exec vxlan-vm1 ip l set dummy0 up", true},
+		{"sudo ip netns exec vxlan-vm1 ip a add 192.168.0.1/32 dev dummy0", true},
+		{"sudo ip netns exec vxlan-vm1 ip r add 192.168.0.0/24 dev vxlan", true},
+
+		{"sudo ip netns exec vxlan-vm2 ip l add vxlan type vxlan id 10 group 239.0.0.10 ttl 10 dev eth0 dstport 4789", true},
+		{"sudo ip netns exec vxlan-vm2 ip l set vxlan up", true},
+		{"sudo ip netns exec vxlan-vm2 ip link add name dummy0 type dummy", true},
+		{"sudo ip netns exec vxlan-vm2 ip l set dummy0 up", true},
+		{"sudo ip netns exec vxlan-vm2 ip a add 192.168.0.2/32 dev dummy0", true},
+		{"sudo ip netns exec vxlan-vm2 ip r add 192.168.0.0/24 dev vxlan", true},
+
+		{"sudo ip netns exec vxlan-vm1 ping -c 5 -I 192.168.0.1 192.168.0.2", false},
+	}
+
+	tearDownCmds := []helper.Cmd{
+		{"ip netns del vxlan-vm1", true},
+		{"ip netns del vxlan-vm2", true},
+		{"ovs-vsctl del-br br-vxlan", true},
+	}
+
+	helper.ExecCmds(t, setupCmds...)
+	defer helper.ExecCmds(t, tearDownCmds...)
+
+	gh := helper.NewGremlinQueryHelper(&http.AuthenticationOpts{})
+
+	flows1 := gh.GetFlowsFromGremlinReply(t, `G.V().Has('Name', 'vxlan-vm1').Out().Has('Name', 'vxlan').Flows()`)
+	flows2 := gh.GetFlowsFromGremlinReply(t, `G.V().Has('Name', 'vxlan-vm2-eth0').Flows()`)
+
+	var TrackID string
+	for _, flow := range flows1 {
+		if strings.Contains(flow.LayersPath, "ICMPv4/Payload") {
+			TrackID = flow.TrackingID
+		}
+	}
+
+	success := false
+	for _, flow := range flows2 {
+		if TrackID == flow.TrackingID && strings.Contains(flow.LayersPath, "ICMPv4/Payload") {
+			success = true
+		}
+	}
+
+	if !success {
+		t.Errorf("TrackingID not found in VXLAN tunnel: %v == %v", flows1, flows2)
+	}
+
+	client.Delete("capture", capture1.ID())
+	client.Delete("capture", capture2.ID())
+}
