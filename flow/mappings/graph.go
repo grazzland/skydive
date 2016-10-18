@@ -33,7 +33,7 @@ type GraphFlowEnhancer struct {
 	Graph *graph.Graph
 }
 
-func (gfe *GraphFlowEnhancer) getNodeUUID(mac string) string {
+func (gfe *GraphFlowEnhancer) getNodeUUIDMac(mac string) string {
 	if packet.IsBroadcastMac(mac) || packet.IsMulticastMac(mac) {
 		return "*"
 	}
@@ -50,17 +50,42 @@ func (gfe *GraphFlowEnhancer) getNodeUUID(mac string) string {
 	return ""
 }
 
+func (gfe *GraphFlowEnhancer) getNodeUUIDIP(ip string) string {
+	if packet.IsMulticastIP(ip) {
+		return "*"
+	}
+
+	gfe.Graph.RLock()
+	defer gfe.Graph.RUnlock()
+
+	intfs := gfe.Graph.LookupNodes(graph.Metadata{"IP": ip})
+	if len(intfs) > 1 {
+		logging.GetLogger().Infof("GraphFlowEnhancer found more than one interface for the ip: %s", ip)
+	} else if len(intfs) == 1 {
+		return string(intfs[0].ID)
+	}
+	return ""
+}
+
 func (gfe *GraphFlowEnhancer) Enhance(f *flow.Flow) {
 	if f.ANodeUUID == "" || f.BNodeUUID == "" {
-		if f.Link == nil {
+		if f.Link == nil && f.Network == nil {
 			return
 		}
 	}
 	if f.ANodeUUID == "" {
-		f.ANodeUUID = gfe.getNodeUUID(f.Link.A)
+		if f.Link != nil {
+			f.ANodeUUID = gfe.getNodeUUIDMac(f.Link.A)
+		} else {
+			f.ANodeUUID = gfe.getNodeUUIDIP(f.Network.A)
+		}
 	}
 	if f.BNodeUUID == "" {
-		f.BNodeUUID = gfe.getNodeUUID(f.Link.B)
+		if f.Link != nil {
+			f.BNodeUUID = gfe.getNodeUUIDMac(f.Link.B)
+		} else {
+			f.BNodeUUID = gfe.getNodeUUIDIP(f.Network.B)
+		}
 	}
 }
 
