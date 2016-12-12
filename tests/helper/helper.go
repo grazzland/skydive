@@ -84,19 +84,6 @@ func init() {
 	flag.Parse()
 }
 
-func SFlowSetup(t *testing.T) (*net.UDPConn, error) {
-	addr := net.UDPAddr{
-		Port: 0,
-		IP:   net.ParseIP("localhost"),
-	}
-	conn, err := net.ListenUDP("udp", &addr)
-	if err != nil {
-		t.Errorf("Unable to listen on UDP %s", err.Error())
-		return nil, err
-	}
-	return conn, nil
-}
-
 func InitConfig(t *testing.T, conf string, params ...HelperParams) {
 	f, err := ioutil.TempFile("", "skydive_agent")
 	if err != nil {

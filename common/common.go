@@ -36,11 +36,23 @@ import (
 	"github.com/vishvananda/netns"
 )
 
+type ServiceType string
+
+const (
+	AnalyzerService ServiceType = "analyzer"
+	AgentService    ServiceType = "agent"
+)
+
 const (
 	StoppedState = iota
 	RunningState
 	StoppingState
 )
+
+type ServiceAddress struct {
+	Addr string
+	Port int
+}
 
 type CaptureType struct {
 	Allowed []string
@@ -51,6 +63,10 @@ var (
 	CantCompareInterface error = errors.New("Can't compare interface")
 	CaptureTypes               = map[string]CaptureType{}
 )
+
+func (st ServiceType) String() string {
+	return string(st)
+}
 
 func initCaptureTypes() {
 	// add ovs type
@@ -320,4 +336,27 @@ func IPToString(ip net.IP) string {
 		return "[" + ip.String() + "]"
 	}
 	return ip.String()
+}
+
+func ServiceAddressFromString(addressPort string) (ServiceAddress, error) {
+	/* Backward compatibility for old format like : listen = 1234 */
+	if !strings.ContainsAny(addressPort, ".:") {
+		addressPort = ":" + addressPort
+	}
+	/* validate IPv4 and IPv6 address */
+	IPAddr, err := net.ResolveUDPAddr("", addressPort)
+	if err != nil {
+		return ServiceAddress{}, err
+	}
+	IPaddr := IPAddr.IP
+	port := IPAddr.Port
+
+	addr := "localhost"
+	if IPaddr != nil {
+		addr = IPToString(IPaddr)
+	}
+	return ServiceAddress{
+		Addr: addr,
+		Port: port,
+	}, nil
 }

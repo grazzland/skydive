@@ -23,6 +23,8 @@
 package probes
 
 import (
+	"sync"
+
 	"github.com/skydive-project/skydive/analyzer"
 	"github.com/skydive-project/skydive/api"
 	"github.com/skydive-project/skydive/config"
@@ -46,9 +48,10 @@ type FlowProbeInterface interface {
 }
 
 type FlowProbe struct {
-	fpi      FlowProbeInterface
-	pipeline *mappings.FlowMappingPipeline
-	client   *analyzer.Client
+	sync.RWMutex
+	fpi            FlowProbeInterface
+	pipeline       *mappings.FlowMappingPipeline
+	flowClientPool *analyzer.FlowClientPool
 }
 
 func (fp FlowProbe) Start() {
@@ -69,9 +72,11 @@ func (fp *FlowProbe) UnregisterProbe(n *graph.Node) error {
 
 func (fp *FlowProbe) AsyncFlowPipeline(flows []*flow.Flow) {
 	fp.pipeline.Enhance(flows)
-	if fp.client != nil {
-		fp.client.SendFlows(flows)
-	}
+
+	fp.RLock()
+	defer fp.RUnlock()
+
+	fp.flowClientPool.SendFlows(flows)
 }
 
 func (fpb *FlowProbeBundle) UnregisterAllProbes() {
@@ -80,31 +85,15 @@ func (fpb *FlowProbeBundle) UnregisterAllProbes() {
 
 	for _, n := range fpb.Graph.GetNodes(graph.Metadata{}) {
 		for _, p := range fpb.ProbeBundle.Probes {
-			fprobe := p.(FlowProbe)
+			fprobe := p.(*FlowProbe)
 			fprobe.UnregisterProbe(n)
 		}
 	}
 }
 
-func NewFlowProbeBundleFromConfig(tb *probe.ProbeBundle, g *graph.Graph, fta *flow.TableAllocator) *FlowProbeBundle {
+func NewFlowProbeBundleFromConfig(tb *probe.ProbeBundle, g *graph.Graph, fta *flow.TableAllocator, fcpool *analyzer.FlowClientPool) *FlowProbeBundle {
 	list := config.GetConfig().GetStringSlice("agent.flow.probes")
 	logging.GetLogger().Infof("Flow probes: %v", list)
-
-	var aclient *analyzer.Client
-
-	addr, port, err := config.GetAnalyzerClientAddr()
-	if err != nil {
-		logging.GetLogger().Errorf("Unable to parse analyzer client: %s", err.Error())
-		return nil
-	}
-
-	if addr != "" {
-		aclient, err = analyzer.NewClient(addr, port)
-		if err != nil {
-			logging.GetLogger().Errorf("Analyzer client error %s:%d : %s", addr, port, err.Error())
-			return nil
-		}
-	}
 
 	pipeline := mappings.NewFlowMappingPipeline(mappings.NewGraphFlowEnhancer(g))
 
@@ -123,12 +112,12 @@ func NewFlowProbeBundleFromConfig(tb *probe.ProbeBundle, g *graph.Graph, fta *fl
 		case "ovssflow":
 			o := NewOvsSFlowProbesHandler(tb, g)
 			if o != nil {
-				probes[t] = FlowProbe{fpi: o, pipeline: pipeline, client: aclient}
+				probes[t] = &FlowProbe{fpi: o, pipeline: pipeline, flowClientPool: fcpool}
 			}
 		case "gopacket":
 			o := NewGoPacketProbesHandler(g)
 			if o != nil {
-				gopacket := FlowProbe{fpi: o, pipeline: pipeline, client: aclient}
+				gopacket := &FlowProbe{fpi: o, pipeline: pipeline, flowClientPool: fcpool}
 
 				probes["afpacket"] = gopacket
 				probes["pcap"] = gopacket

@@ -27,6 +27,8 @@ import (
 	"sync"
 
 	"github.com/skydive-project/skydive/api"
+	"github.com/skydive-project/skydive/common"
+	"github.com/skydive-project/skydive/etcd"
 	"github.com/skydive-project/skydive/flow/ondemand"
 	shttp "github.com/skydive-project/skydive/http"
 	"github.com/skydive-project/skydive/logging"
@@ -43,6 +45,7 @@ type OnDemandProbeClient struct {
 	captures       map[string]*api.Capture
 	watcher        api.StoppableWatcher
 	parser         *traversal.GremlinTraversalParser
+	elector        *etcd.EtcdLeaderElector
 }
 
 func (o *OnDemandProbeClient) registerProbe(node *graph.Node, capture *api.Capture) bool {
@@ -101,6 +104,11 @@ func (o *OnDemandProbeClient) matchGremlinExpr(node *graph.Node, gremlin string)
 }
 
 func (o *OnDemandProbeClient) onNodeEvent(n *graph.Node) {
+	// TODO(safchain) need to be moved later
+	if !o.elector.IsLeader() {
+		return
+	}
+
 	if state, ok := n.Metadata()["State/FlowCapture"]; ok && state.(string) == "ON" {
 		return
 	}
@@ -137,6 +145,11 @@ func (o *OnDemandProbeClient) onCaptureAdded(capture *api.Capture) {
 	defer o.graph.RUnlock()
 
 	o.captures[capture.UUID] = capture
+
+	// TODO(safchain) need to be moved later
+	if !o.elector.IsLeader() {
+		return
+	}
 
 	ts, err := o.parser.Parse(strings.NewReader(capture.GremlinQuery))
 	if err != nil {
@@ -221,20 +234,25 @@ func (o *OnDemandProbeClient) onApiWatcherEvent(action string, id string, resour
 }
 
 func (o *OnDemandProbeClient) Start() {
+	o.elector.Start()
+
 	o.watcher = o.captureHandler.AsyncWatch(o.onApiWatcherEvent)
 	o.graph.AddEventListener(o)
 }
 
 func (o *OnDemandProbeClient) Stop() {
 	o.watcher.Stop()
+	o.elector.Stop()
 }
 
-func NewOnDemandProbeClient(g *graph.Graph, ch *api.CaptureApiHandler, w *shttp.WSServer) *OnDemandProbeClient {
+func NewOnDemandProbeClient(g *graph.Graph, ch *api.CaptureApiHandler, w *shttp.WSServer, etcdClient *etcd.EtcdClient) *OnDemandProbeClient {
 	resources := ch.List()
 	captures := make(map[string]*api.Capture)
 	for _, resource := range resources {
 		captures[resource.ID()] = resource.(*api.Capture)
 	}
+
+	elector := etcd.NewEtcdLeaderElectorFromConfig(common.AnalyzerService, "ondemand-client", etcdClient)
 
 	return &OnDemandProbeClient{
 		graph:          g,
@@ -242,5 +260,6 @@ func NewOnDemandProbeClient(g *graph.Graph, ch *api.CaptureApiHandler, w *shttp.
 		wsServer:       w,
 		captures:       captures,
 		parser:         traversal.NewGremlinTraversalParser(g),
+		elector:        elector,
 	}
 }

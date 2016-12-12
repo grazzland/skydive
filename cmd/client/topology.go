@@ -48,7 +48,7 @@ var TopologyCmd = &cobra.Command{
 }
 
 func SendGremlinQuery(auth *shttp.AuthenticationOpts, query string) (io.ReadCloser, error) {
-	client, err := shttp.NewRestClientFromConfig(auth)
+	client, err := api.NewRestClientFromConfig(auth)
 	if err != nil {
 		return nil, err
 	}

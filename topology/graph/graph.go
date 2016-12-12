@@ -812,18 +812,18 @@ func (g *Graph) GetContext() GraphContext {
 	return g.context
 }
 
-func NewGraph(hostID string, backend GraphBackend) *Graph {
+func NewGraph(host string, backend GraphBackend) *Graph {
 	return &Graph{
 		backend:   backend,
-		host:      hostID,
+		host:      host,
 		context:   GraphContext{},
 		eventChan: make(chan graphEvent, maxEvents),
 	}
 }
 
 func NewGraphFromConfig(backend GraphBackend) *Graph {
-	hostID := config.GetConfig().GetString("host_id")
-	return NewGraph(hostID, backend)
+	host := config.GetConfig().GetString("host_id")
+	return NewGraph(host, backend)
 }
 
 func NewGraphWithContext(hostID string, backend GraphBackend, context GraphContext) (*Graph, error) {

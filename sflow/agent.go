@@ -32,6 +32,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 
+	"github.com/skydive-project/skydive/common"
 	"github.com/skydive-project/skydive/config"
 	"github.com/skydive-project/skydive/flow"
 	"github.com/skydive-project/skydive/logging"
@@ -140,12 +141,12 @@ func NewSFlowAgent(u string, a string, p int, ft *flow.Table) *SFlowAgent {
 }
 
 func NewSFlowAgentFromConfig(u string, ft *flow.Table) (*SFlowAgent, error) {
-	addr, port, err := config.GetHostPortAttributes("sflow", "listen")
+	sa, err := common.ServiceAddressFromString("sflow.listen")
 	if err != nil {
 		return nil, err
 	}
 
-	return NewSFlowAgent(u, addr, port, ft), nil
+	return NewSFlowAgent(u, sa.Addr, sa.Port, ft), nil
 }
 
 func (a *SFlowAgentAllocator) Agents() []*SFlowAgent {

@@ -37,7 +37,6 @@ import (
 )
 
 type PacketInjectorApi struct {
-	Service  string
 	PIClient *packet_injector.PacketInjectorClient
 	Graph    *graph.Graph
 }
@@ -151,9 +150,8 @@ func (pi *PacketInjectorApi) registerEndpoints(r *shttp.Server) {
 	r.RegisterRoutes(routes)
 }
 
-func RegisterPacketInjectorApi(s string, pic *packet_injector.PacketInjectorClient, g *graph.Graph, r *shttp.Server) {
+func RegisterPacketInjectorApi(pic *packet_injector.PacketInjectorClient, g *graph.Graph, r *shttp.Server) {
 	pia := &PacketInjectorApi{
-		Service:  s,
 		PIClient: pic,
 		Graph:    g,
 	}

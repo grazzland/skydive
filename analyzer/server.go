@@ -32,6 +32,7 @@ import (
 
 	"github.com/skydive-project/skydive/alert"
 	"github.com/skydive-project/skydive/api"
+	"github.com/skydive-project/skydive/common"
 	"github.com/skydive-project/skydive/config"
 	"github.com/skydive-project/skydive/etcd"
 	"github.com/skydive-project/skydive/flow"
@@ -46,9 +47,11 @@ import (
 )
 
 type Server struct {
+	shttp.DefaultWSServerEventHandler
 	HTTPServer          *shttp.Server
 	WSServer            *shttp.WSServer
 	GraphServer         *graph.GraphServer
+	TopologyForwarder   *TopologyForwarder
 	AlertServer         *alert.AlertServer
 	OnDemandClient      *ondemand.OnDemandProbeClient
 	FlowMappingPipeline *mappings.FlowMappingPipeline
@@ -56,7 +59,7 @@ type Server struct {
 	Storage             storage.Storage
 	FlowTable           *flow.Table
 	TableClient         *flow.TableClient
-	conn                *AgentAnalyzerServerConn
+	conn                *FlowServerConn
 	EmbeddedEtcd        *etcd.EmbeddedEtcd
 	EtcdClient          *etcd.EtcdClient
 	running             atomic.Value
@@ -79,7 +82,7 @@ func (s *Server) AnalyzeFlows(flows []*flow.Flow) {
 }
 
 /* handleFlowPacket can handle connection based on TCP or UDP */
-func (s *Server) handleFlowPacket(conn *AgentAnalyzerServerConn) {
+func (s *Server) handleFlowPacket(conn *FlowServerConn) {
 	defer s.wgFlowsHandlers.Done()
 	defer conn.Close()
 
@@ -117,6 +120,8 @@ func (s *Server) ListenAndServe() {
 		s.Storage.Start()
 	}
 
+	s.TopologyForwarder.ConnectAll()
+
 	s.ProbeBundle.Start()
 	s.OnDemandClient.Start()
 	s.AlertServer.Start()
@@ -134,7 +139,7 @@ func (s *Server) ListenAndServe() {
 
 	host := s.HTTPServer.Addr + ":" + strconv.FormatInt(int64(s.HTTPServer.Port), 10)
 	addr, err := net.ResolveUDPAddr("udp", host)
-	s.conn, err = NewAgentAnalyzerServerConn(addr)
+	s.conn, err = NewFlowServerConn(addr)
 	if err != nil {
 		panic(err)
 	}
@@ -206,12 +211,12 @@ func NewServerFromConfig() (*Server, error) {
 
 	g := graph.NewGraphFromConfig(backend)
 
-	httpServer, err := shttp.NewServerFromConfig("analyzer")
+	httpServer, err := shttp.NewServerFromConfig(common.AnalyzerService)
 	if err != nil {
 		return nil, err
 	}
 
-	wsServer := shttp.NewWSServerFromConfig(httpServer, "/ws")
+	wsServer := shttp.NewWSServerFromConfig(common.AnalyzerService, httpServer, "/ws")
 
 	probeBundle, err := NewTopologyProbeBundleFromConfig(g)
 	if err != nil {
@@ -276,7 +281,7 @@ func NewServerFromConfig() (*Server, error) {
 		return nil, err
 	}
 
-	onDemandClient := ondemand.NewOnDemandProbeClient(g, captureApiHandler, wsServer)
+	onDemandClient := ondemand.NewOnDemandProbeClient(g, captureApiHandler, wsServer, etcdClient)
 
 	pipeline := mappings.NewFlowMappingPipeline(mappings.NewGraphFlowEnhancer(g))
 
@@ -291,15 +296,18 @@ func NewServerFromConfig() (*Server, error) {
 		return nil, err
 	}
 
-	aserver := alert.NewAlertServer(g, alertApiHandler, wsServer, tableClient, store)
+	aserver := alert.NewAlertServer(g, alertApiHandler, wsServer, tableClient, store, etcdClient)
 	gserver := graph.NewServer(g, wsServer)
 
 	piClient := packet_injector.NewPacketInjectorClient(wsServer)
+
+	forwarder := NewTopologyForwarderFromConfig(g, wsServer)
 
 	server := &Server{
 		HTTPServer:          httpServer,
 		WSServer:            wsServer,
 		GraphServer:         gserver,
+		TopologyForwarder:   forwarder,
 		AlertServer:         aserver,
 		OnDemandClient:      onDemandClient,
 		FlowMappingPipeline: pipeline,
@@ -310,16 +318,18 @@ func NewServerFromConfig() (*Server, error) {
 		Storage:             store,
 	}
 
+	wsServer.AddEventHandler(server)
+
 	updateHandler := flow.NewFlowHandler(server.flowExpireUpdate, time.Second*time.Duration(analyzerUpdate))
 	expireHandler := flow.NewFlowHandler(server.flowExpireUpdate, time.Second*time.Duration(analyzerExpire))
 	flowtable := flow.NewTable(updateHandler, expireHandler)
 	server.FlowTable = flowtable
 
-	api.RegisterTopologyApi("analyzer", g, httpServer, tableClient, server.Storage)
+	api.RegisterTopologyApi(g, httpServer, tableClient, server.Storage)
 
-	api.RegisterFlowApi("analyzer", flowtable, server.Storage, httpServer)
+	api.RegisterFlowApi(flowtable, server.Storage, httpServer)
 
-	api.RegisterPacketInjectorApi("analyzer", piClient, g, httpServer)
+	api.RegisterPacketInjectorApi(piClient, g, httpServer)
 
 	return server, nil
 }
