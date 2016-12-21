@@ -198,6 +198,11 @@ func (p *GoPacketProbesHandler) RegisterProbe(n *graph.Node, capture *api.Captur
 		logging.GetLogger().Infof("MPLSoUDP port: %v", port)
 	}
 
+	// By default, gopacket tries to decode IPv4 or IPv6 in the
+	// MPLS next layer and fails otherwise. Instead, we also tries
+	// to decode it as Ethernet.
+	layers.MPLSPayloadDecoder = flow.LayerTypeInMplsEthOrIp
+
 	probe := &GoPacketProbe{
 		NodeTID:   tid.(string),
 		state:     common.StoppedState,
