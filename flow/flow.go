@@ -134,12 +134,15 @@ func layerPathFromGoPacket(packet *gopacket.Packet) string {
 
 func (flow *Flow) UpdateUUID(key string) {
 	hasher := sha1.New()
-	hasher.Write([]byte(flow.LayersPath))
+
+	hasher.Write(flow.Transport.Hash())
+	hasher.Write(flow.Network.Hash())
+	flow.L3TrackingID = hex.EncodeToString(hasher.Sum(nil))
 
 	hasher.Write(flow.Link.Hash())
-	hasher.Write(flow.Network.Hash())
-	hasher.Write(flow.Transport.Hash())
 	flow.TrackingID = hex.EncodeToString(hasher.Sum(nil))
+
+	hasher.Write([]byte(flow.LayersPath))
 
 	bfStart := make([]byte, 8)
 	binary.BigEndian.PutUint64(bfStart, uint64(flow.Metric.Start))
@@ -520,6 +523,8 @@ func (f *Flow) GetFieldString(field string) (string, error) {
 		return f.LayersPath, nil
 	case "TrackingID":
 		return f.TrackingID, nil
+	case "L3TrackingID":
+		return f.L3TrackingID, nil
 	case "ParentUUID":
 		return f.ParentUUID, nil
 	case "NodeTID":
