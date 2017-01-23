@@ -152,8 +152,9 @@ func (f *TableClient) LookupFlows(flowSearchQuery FlowSearchQuery) (*FlowSet, er
 func (f *TableClient) LookupFlowsByNodes(hnmap topology.HostNodeTIDMap, flowSearchQuery FlowSearchQuery) (*FlowSet, error) {
 	ch := make(chan *FlowSet, len(hnmap))
 
+	searchQuery := flowSearchQuery.Filter
 	for host, tids := range hnmap {
-		flowSearchQuery.Filter = NewAndFilter(NewFilterForNodeTIDs(tids), flowSearchQuery.Filter)
+		flowSearchQuery.Filter = NewAndFilter(NewFilterForNodeTIDs(tids), searchQuery)
 		go f.lookupFlows(ch, host, flowSearchQuery)
 	}
 
