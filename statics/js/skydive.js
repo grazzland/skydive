@@ -35,6 +35,7 @@ var pinIndicatorImg = 'statics/img/pin.png';
 
 var alerts = {};
 
+var Service;
 var CurrentNodeDetails;
 var FlowGrid;
 var FlowDataView;
@@ -467,7 +468,9 @@ Layout.prototype.NodeDetails = function(node) {
   $("#metadata").JSONView(json);
   $("#node-id").html(node.ID);
 
-  ShowNodeFlows(node);
+  if (Service == 'Analyzer') {
+    ShowNodeFlows(node);
+  }
 };
 
 Layout.prototype.Hash = function(str) {
@@ -1225,23 +1228,44 @@ function AnalyzerReady() {
 
     discoveryLayout.DrawChart();
   });
+
+  SetupTimeSlider();
+  SetupFlowRefresh();
+  SetupFlowGrid();
+  SetupControlButtons();
 }
 
 function Logout() {
   window.location.href = "/login";
 }
 
+function CheckAPI() {
+  return $.ajax({
+    dataType: "json",
+    url: '/api',
+    error: function(e) {
+      if (e.status == 401)
+        Logout();
+    }
+  });
+}
+
 function StartCheckAPIAccess() {
-  setInterval(function() {
-    $.ajax({
-      dataType: "json",
-      url: '/api',
-      error: function(e) {
-        if (e.status == 401)
-          Logout();
+  CheckAPI()
+    .then(function(r) {
+      Service = r.Service;
+      $('#service').html(Service + " " + r.Version);
+      vueSidebar.service = Service;
+      if (Service == "Agent") {
+        AgentReady();
       }
+      else {
+        AnalyzerReady();
+      }
+    })
+    .then(function() {
+      setInterval(CheckAPI, 5000);
     });
-  }, 5000);
 }
 
 function SetupFlowRefresh() {
@@ -1455,13 +1479,6 @@ function SetupControlButtons() {
 }
 
 $(document).ready(function() {
-  if (Service == "agent") {
-    AgentReady();
-  }
-  else {
-    AnalyzerReady();
-  }
-
   $('.content').resizable({
     handles: 'e',
     minWidth: 300,
@@ -1488,11 +1505,4 @@ $(document).ready(function() {
   topologyLayout = new Layout(".topology-d3");
   vueSidebar = new Vue(VueSidebar);
   StartCheckAPIAccess();
-
-  if (Service != "agent") {
-    SetupTimeSlider();
-    SetupFlowRefresh();
-    SetupFlowGrid();
-    SetupControlButtons();
-  }
 });

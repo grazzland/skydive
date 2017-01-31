@@ -39,9 +39,10 @@ import (
 )
 
 type ApiServer struct {
-	HTTPServer *shttp.Server
-	EtcdKeyAPI etcd.KeysAPI
-	handlers   map[string]ApiHandler
+	HTTPServer  *shttp.Server
+	EtcdKeyAPI  etcd.KeysAPI
+	ServiceName string
+	handlers    map[string]ApiHandler
 }
 
 type HandlerFunc func(w http.ResponseWriter, r *http.Request)
@@ -176,8 +177,10 @@ func (a *ApiServer) RegisterApiHandler(handler ApiHandler) error {
 
 func (a *ApiServer) addAPIRootRoute() {
 	s := struct {
+		Service string
 		Version string
 	}{
+		Service: a.ServiceName,
 		Version: version.Version,
 	}
 
@@ -203,11 +206,12 @@ func (a *ApiServer) GetHandler(s string) ApiHandler {
 	return a.handlers[s]
 }
 
-func NewApi(server *shttp.Server, kapi etcd.KeysAPI) (*ApiServer, error) {
+func NewApi(server *shttp.Server, kapi etcd.KeysAPI, serviceName string) (*ApiServer, error) {
 	apiServer := &ApiServer{
-		HTTPServer: server,
-		EtcdKeyAPI: kapi,
-		handlers:   make(map[string]ApiHandler),
+		HTTPServer:  server,
+		EtcdKeyAPI:  kapi,
+		ServiceName: serviceName,
+		handlers:    make(map[string]ApiHandler),
 	}
 
 	apiServer.addAPIRootRoute()
